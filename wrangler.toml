@@ -1,4 +1,4 @@
-name = "qr-generator-api"
+name = "qr"
 main = "worker.js"
 compatibility_date = "2024-01-15"
 
