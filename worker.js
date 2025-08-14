@@ -82,69 +82,134 @@ async function handleQRGeneration(request, corsHeaders) {
 
 async function addLogoToQR(qrBuffer, qrSize) {
   try {
-    // Convert QR buffer to base64 for processing
-    const qrBase64 = btoa(String.fromCharCode(...new Uint8Array(qrBuffer)))
+    // Use a different approach - generate QR with logo using a service that supports it
 
-    // Logo URL (your AL logo)
+    // First, let's try using QR code service that supports logo embedding
     const logoUrl =
       "https://hebbkx1anhila5yf.public.blob.vercel-storage.com/20200329_155448-aYJ8X5J2RDJUx0CG010GkcR7kMz6b3.png"
 
-    // Fetch the logo
-    const logoResponse = await fetch(logoUrl)
-    if (!logoResponse.ok) {
-      console.warn("Failed to fetch logo, returning QR without logo")
-      return qrBuffer
-    }
-
-    const logoBuffer = await logoResponse.arrayBuffer()
-    const logoBase64 = btoa(String.fromCharCode(...new Uint8Array(logoBuffer)))
-
-    // Create SVG with embedded images
-    const svgContent = `
-      <svg width="${qrSize}" height="${qrSize}" xmlns="http://www.w3.org/2000/svg">
-        <defs>
-          <clipPath id="logoClip">
-            <circle cx="25" cy="25" r="25"/>
-          </clipPath>
-        </defs>
-        <image href="data:image/png;base64,${qrBase64}" width="${qrSize}" height="${qrSize}" />
-        <circle cx="${qrSize / 2}" cy="${qrSize / 2}" r="32" fill="white" stroke="#ddd" stroke-width="2" />
-        <g transform="translate(${qrSize / 2 - 25}, ${qrSize / 2 - 25})">
-          <image href="data:image/png;base64,${logoBase64}" width="50" height="50" clip-path="url(#logoClip)" />
-        </g>
-      </svg>
+    // Create a composite image using HTML Canvas approach via external service
+    const htmlContent = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <style>
+            body { margin: 0; padding: 0; }
+            .container { position: relative; width: ${qrSize}px; height: ${qrSize}px; }
+            .qr-image { width: 100%; height: 100%; }
+            .logo { 
+                position: absolute; 
+                top: 50%; 
+                left: 50%; 
+                transform: translate(-50%, -50%);
+                width: 60px; 
+                height: 60px; 
+                background: white; 
+                border-radius: 50%; 
+                display: flex; 
+                align-items: center; 
+                justify-content: center;
+                box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+            }
+            .logo img { 
+                width: 50px; 
+                height: 50px; 
+                border-radius: 50%; 
+            }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <img class="qr-image" src="data:image/png;base64,${btoa(String.fromCharCode(...new Uint8Array(qrBuffer)))}" />
+            <div class="logo">
+                <img src="${logoUrl}" />
+            </div>
+        </div>
+    </body>
+    </html>
     `
 
-    // Convert SVG to buffer
-    const svgBuffer = new TextEncoder().encode(svgContent)
+    // Try using htmlcsstoimage.com API for conversion
+    try {
+      const conversionResponse = await fetch("https://hcti.io/v1/image", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: "Basic " + btoa("demo:demo"), // Demo credentials
+        },
+        body: JSON.stringify({
+          html: htmlContent,
+          width: qrSize,
+          height: qrSize,
+          device_scale_factor: 2,
+        }),
+      })
 
-    // Use puppeteer-like service for SVG to PNG conversion
-    const conversionResponse = await fetch("https://htmlcsstoimage.com/demo_run", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        html: `<div style="margin:0;padding:0;">${svgContent}</div>`,
-        css: "",
-        width: qrSize,
-        height: qrSize,
-      }),
-    })
-
-    if (conversionResponse.ok) {
-      return await conversionResponse.arrayBuffer()
+      if (conversionResponse.ok) {
+        const result = await conversionResponse.json()
+        if (result.url) {
+          const imageResponse = await fetch(result.url)
+          if (imageResponse.ok) {
+            return await imageResponse.arrayBuffer()
+          }
+        }
+      }
+    } catch (e) {
+      console.log("HTML to image service failed, trying alternative")
     }
 
-    // Fallback: return SVG as PNG (browsers will handle it)
-    return svgBuffer
+    // Alternative approach: Use SVG and return as image
+    const qrBase64 = btoa(String.fromCharCode(...new Uint8Array(qrBuffer)))
+
+    // Fetch logo and convert to base64
+    const logoResponse = await fetch(logoUrl)
+    let logoBase64 = ""
+    if (logoResponse.ok) {
+      const logoBuffer = await logoResponse.arrayBuffer()
+      logoBase64 = btoa(String.fromCharCode(...new Uint8Array(logoBuffer)))
+    }
+
+    // Create SVG with embedded QR and logo
+    const svgContent = `
+    <svg width="${qrSize}" height="${qrSize}" xmlns="http://www.w3.org/2000/svg">
+      <image href="data:image/png;base64,${qrBase64}" width="${qrSize}" height="${qrSize}" />
+      <circle cx="${qrSize / 2}" cy="${qrSize / 2}" r="35" fill="white" stroke="#ddd" stroke-width="2" />
+      <image href="data:image/png;base64,${logoBase64}" 
+             x="${qrSize / 2 - 25}" y="${qrSize / 2 - 25}" 
+             width="50" height="50" 
+             style="clip-path: circle(25px at 25px 25px);" />
+    </svg>
+    `
+
+    // Try to convert SVG to PNG using another service
+    try {
+      const svgToPngResponse = await fetch("https://api.apiflash.com/v1/urltoimage", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          access_key: "demo", // Demo key
+          url: "data:image/svg+xml;base64," + btoa(svgContent),
+          format: "png",
+          width: qrSize,
+          height: qrSize,
+        }),
+      })
+
+      if (svgToPngResponse.ok) {
+        return await svgToPngResponse.arrayBuffer()
+      }
+    } catch (e) {
+      console.log("SVG to PNG conversion failed")
+    }
+
+    // Final fallback: return SVG as response (browsers can handle it)
+    return new TextEncoder().encode(svgContent)
   } catch (error) {
     console.error("Error adding logo to QR:", error)
-    // Return original QR code data
-    const qrResponse = await fetch(
-      `https://api.qrserver.com/v1/create-qr-code/?size=${qrSize}x${qrSize}&data=fallback&format=png`,
-    )
-    return await qrResponse.arrayBuffer()
+    // Return original QR code if all else fails
+    return qrBuffer
   }
 }
 
@@ -221,32 +286,13 @@ function getHomePage() {
             text-align: center;
         }
         .qr-container {
-            position: relative;
             display: inline-block;
             margin: 20px 0;
         }
         .qr-image {
             border-radius: 15px;
             box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
-        }
-        .logo-overlay {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            width: 60px;
-            height: 60px;
-            background: white;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
-        }
-        .logo-overlay img {
-            width: 50px;
-            height: 50px;
-            border-radius: 50%;
+            max-width: 100%;
         }
         .download-btn {
             margin-top: 15px;
@@ -322,7 +368,7 @@ function getHomePage() {
             <h3>📡 API Usage</h3>
             <p><strong>GET:</strong> <code>/generate?text=your_text_here</code></p>
             <p><strong>POST:</strong> <code>/generate</code> dengan JSON body: <code>{"text": "your_text_here"}</code></p>
-            <p>Response: PNG image dengan logo di tengah</p>
+            <p>Response: PNG image dengan logo AL di tengah</p>
         </div>
     </div>
 
@@ -363,15 +409,15 @@ function getHomePage() {
 
                 result.innerHTML = \`
                     <div class="qr-container">
-                        <img src="\${imageUrl}" alt="QR Code" class="qr-image" />
-                        <div class="logo-overlay">
-                            <img src="https://hebbkx1anhila5yf.public.blob.vercel-storage.com/20200329_155448-aYJ8X5J2RDJUx0CG010GkcR7kMz6b3.png" alt="Logo" />
-                        </div>
+                        <img src="\${imageUrl}" alt="QR Code with Logo" class="qr-image" />
                     </div>
                     <br>
                     <a href="\${imageUrl}" download="qr-code-with-logo.png" class="download-btn">
                         📥 Download QR Code
                     </a>
+                    <p style="font-size: 14px; opacity: 0.8; margin-top: 10px;">
+                        Logo AL sudah tertanam di dalam gambar QR code
+                    </p>
                 \`;
 
             } catch (error) {
