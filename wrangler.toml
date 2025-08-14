@@ -1,0 +1,6 @@
+name = "qr-generator-api"
+main = "worker.js"
+compatibility_date = "2024-01-15"
+
+[env.production]
+name = "qr-generator-api"

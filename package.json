@@ -1,0 +1,13 @@
+{
+  "name": "qr-generator-worker",
+  "version": "1.0.0",
+  "description": "QR Code Generator API for Cloudflare Workers",
+  "main": "worker.js",
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "dev": "wrangler dev"
+  },
+  "keywords": ["qr-code", "cloudflare-workers", "api"],
+  "author": "Your Name",
+  "license": "MIT"
+}
