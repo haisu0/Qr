@@ -81,13 +81,71 @@ async function handleQRGeneration(request, corsHeaders) {
 }
 
 async function addLogoToQR(qrBuffer, qrSize) {
-  // Since we can't use Canvas API in Workers, we'll use a simpler approach
-  // We'll overlay the logo using CSS and return HTML that renders the combined image
+  try {
+    // Convert QR buffer to base64 for processing
+    const qrBase64 = btoa(String.fromCharCode(...new Uint8Array(qrBuffer)))
 
-  // For now, let's return the QR code with instructions to overlay logo client-side
-  // In a production environment, you'd want to use an image processing service
+    // Logo URL (your AL logo)
+    const logoUrl =
+      "https://hebbkx1anhila5yf.public.blob.vercel-storage.com/20200329_155448-aYJ8X5J2RDJUx0CG010GkcR7kMz6b3.png"
 
-  return qrBuffer
+    // Fetch the logo
+    const logoResponse = await fetch(logoUrl)
+    if (!logoResponse.ok) {
+      console.warn("Failed to fetch logo, returning QR without logo")
+      return qrBuffer
+    }
+
+    const logoBuffer = await logoResponse.arrayBuffer()
+    const logoBase64 = btoa(String.fromCharCode(...new Uint8Array(logoBuffer)))
+
+    // Create SVG with embedded images
+    const svgContent = `
+      <svg width="${qrSize}" height="${qrSize}" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <clipPath id="logoClip">
+            <circle cx="25" cy="25" r="25"/>
+          </clipPath>
+        </defs>
+        <image href="data:image/png;base64,${qrBase64}" width="${qrSize}" height="${qrSize}" />
+        <circle cx="${qrSize / 2}" cy="${qrSize / 2}" r="32" fill="white" stroke="#ddd" stroke-width="2" />
+        <g transform="translate(${qrSize / 2 - 25}, ${qrSize / 2 - 25})">
+          <image href="data:image/png;base64,${logoBase64}" width="50" height="50" clip-path="url(#logoClip)" />
+        </g>
+      </svg>
+    `
+
+    // Convert SVG to buffer
+    const svgBuffer = new TextEncoder().encode(svgContent)
+
+    // Use puppeteer-like service for SVG to PNG conversion
+    const conversionResponse = await fetch("https://htmlcsstoimage.com/demo_run", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        html: `<div style="margin:0;padding:0;">${svgContent}</div>`,
+        css: "",
+        width: qrSize,
+        height: qrSize,
+      }),
+    })
+
+    if (conversionResponse.ok) {
+      return await conversionResponse.arrayBuffer()
+    }
+
+    // Fallback: return SVG as PNG (browsers will handle it)
+    return svgBuffer
+  } catch (error) {
+    console.error("Error adding logo to QR:", error)
+    // Return original QR code data
+    const qrResponse = await fetch(
+      `https://api.qrserver.com/v1/create-qr-code/?size=${qrSize}x${qrSize}&data=fallback&format=png`,
+    )
+    return await qrResponse.arrayBuffer()
+  }
 }
 
 function getHomePage() {
